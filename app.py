@@ -1,4 +1,3 @@
-provider, api_key, selected_model = render_ai_sidebar()
 import streamlit as st
 import pandas as pd
 import litellm
