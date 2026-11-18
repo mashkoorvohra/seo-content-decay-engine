@@ -1,24 +1,18 @@
 import streamlit as st
 import pandas as pd
-from sklearn.cluster import AgglomerativeClustering
-from sklearn.feature_extraction.text import TfidfVectorizer
 import litellm
 import requests
-import json
-import re
 
-st.set_page_config(page_title="Universal AI Keyword Clusterer", layout="wide")
-st.title("🧠 Provider-Agnostic Semantic Keyword Clusterer")
-st.markdown("Auto-detects the **latest live AI models** from your provider, or runs **100% free locally** with zero API keys.")
+st.set_page_config(page_title="SEO Content Decay Engine", layout="wide")
+st.title("📉 SEO Content Decay Detector & AI Refresh Planner")
+st.markdown("Identifies high-value pages losing organic clicks and generates **step-by-step content refresh briefs** using the latest AI models.")
 
-# Helper: Auto-fetch the newest models directly from each provider's API
 @st.cache_data(ttl=3600)
 def fetch_live_models(provider_name: str, key: str) -> list:
     defaults = {
         "Google Gemini": ["gemini-4-hydrogen", "gemini-4-carbon", "gemini-4-argon", "gemini-3.5-flash-lite"],
         "Anthropic Claude": ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5-5", "claude-fable-5-2"],
-        "OpenAI": ["gpt-6.2-astra", "gpt-6.2-sol", "gpt-6-luna", "gpt-5.4-mini"],
-        "Groq / OpenRouter": ["groq/llama-3.3-70b-versatile", "openrouter/anthropic/claude-sonnet-5-5"]
+        "OpenAI": ["gpt-6.2-astra", "gpt-6.2-sol", "gpt-6-luna", "gpt-5.4-mini"]
     }
     if not key:
         return defaults.get(provider_name, [])
@@ -40,104 +34,77 @@ def fetch_live_models(provider_name: str, key: str) -> list:
         pass
     return defaults.get(provider_name, [])
 
-# Sidebar Controls
-st.sidebar.header("⚙️ AI Provider Settings")
-provider = st.sidebar.selectbox(
-    "Select AI Engine",
-    ["Free Local Engine (No API Key Needed)", "Google Gemini", "Anthropic Claude", "OpenAI", "Groq / OpenRouter"]
-)
-
+# Sidebar Settings
+st.sidebar.header("⚙️ AI Refresh Strategist")
+provider = st.sidebar.selectbox("AI Provider", ["Free Local Diagnosis Only", "Google Gemini", "Anthropic Claude", "OpenAI"])
 api_key = ""
 selected_model = ""
-embedding_mode = "Local TF-IDF (Free & Universal)"
 
-if provider != "Free Local Engine (No API Key Needed)":
+if provider != "Free Local Diagnosis Only":
     api_key = st.sidebar.text_input(f"Enter {provider} API Key", type="password")
-    available_models = fetch_live_models(provider, api_key)
-    
-    if provider == "Groq / OpenRouter":
-        selected_model = st.sidebar.text_input("Model ID", value=available_models[0])
-    else:
-        selected_model = st.sidebar.selectbox("Select Model (Auto-Updated)", available_models)
-        # Prefix for LiteLLM routing
-        prefix_map = {"Google Gemini": "gemini/", "Anthropic Claude": "anthropic/", "OpenAI": "openai/"}
-        if not selected_model.startswith(prefix_map[provider]):
-            selected_model = prefix_map[provider] + selected_model
+    models_list = fetch_live_models(provider, api_key)
+    selected_model = st.sidebar.selectbox("Select Latest Model", models_list)
+    prefix_map = {"Google Gemini": "gemini/", "Anthropic Claude": "anthropic/", "OpenAI": "openai/"}
+    if not selected_model.startswith(prefix_map[provider]):
+        selected_model = prefix_map[provider] + selected_model
 
-    if provider == "Google Gemini":
-        embedding_mode = st.sidebar.radio("Vector Engine", ["Gemini Neural Embeddings (gemini-embedding-2)", "Local TF-IDF (Free & Universal)"])
-    elif provider == "OpenAI":
-        embedding_mode = st.sidebar.radio("Vector Engine", ["OpenAI Neural Embeddings", "Local TF-IDF (Free & Universal)"])
+# Sample GSC Data or CSV Upload
+uploaded_file = st.file_uploader("Upload GSC Pages Comparison CSV (Columns: Page, Previous Clicks, Current Clicks, Top Query)", type=["csv"])
 
-distance_threshold = st.sidebar.slider("Cluster Tightness (Lower = More Specific)", 0.30, 0.95, 0.72, 0.05)
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
+else:
+    st.info("Showing sample Google Search Console 90-day comparison dataset. Upload your own GSC export CSV above anytime.")
+    df = pd.DataFrame([
+        {"Page": "/blog/home-construction-cost-bangalore/", "Top Query": "house construction cost per sq ft in bangalore", "Previous Clicks": 1420, "Current Clicks": 690},
+        {"Page": "/blog/best-plotted-developments-sarjapur/", "Top Query": "plotted developments on sarjapur road", "Previous Clicks": 980, "Current Clicks": 510},
+        {"Page": "/blog/modern-duplex-elevation-designs/", "Top Query": "modern duplex house elevation designs", "Previous Clicks": 840, "Current Clicks": 790},
+        {"Page": "/services/turnkey-home-builders/", "Top Query": "turnkey residential builders bangalore", "Previous Clicks": 610, "Current Clicks": 240},
+        {"Page": "/blog/vastu-tips-for-new-home/", "Top Query": "vastu shastra for east facing house", "Previous Clicks": 1150, "Current Clicks": 1280},
+    ])
 
-def classify_intent_local(kw: str) -> str:
-    kw_lower = kw.lower()
-    if any(re.search(rf"\b{re.escape(t)}\b", kw_lower) for t in ["hire", "buy", "book", "quote", "consultant", "agency", "services", "builders", "contractors", "company", "companies"]):
-        return "Transactional"
-    if any(re.search(rf"\b{re.escape(t)}\b", kw_lower) for t in ["best", "top", "cost", "price", "pricing", "vs", "review", "reviews", "comparison", "rates", "per sq ft"]):
-        return "Commercial"
-    return "Informational"
+df["Click Change"] = df["Current Clicks"] - df["Previous Clicks"]
+df["Decay %"] = ((df["Click Change"] / df["Previous Clicks"]) * 100).round(1)
+df["Priority"] = df["Decay %"].apply(lambda x: "🔴 Critical Decay" if x <= -35 else ("🟠 Moderate Decay" if x <= -15 else "🟢 Healthy / Growing"))
 
-def name_cluster_local(kw_list: list) -> str:
-    stop_words = {"in", "for", "of", "the", "a", "an", "to", "how", "what", "is", "best", "top", "cost", "price", "guide"}
-    words = [w for kw in kw_list for w in re.findall(r"[a-zA-Z0-9]+", kw.lower()) if w not in stop_words and len(w) > 2]
-    return (" ".join(pd.Series(words).value_counts().head(3).index.tolist()).title() + " Hub") if words else kw_list[0].title()
+decay_only = df[df["Decay %"] < -10].sort_values("Click Change")
 
-default_keywords = """building construction in bangalore
-residential construction companies in bangalore
-house construction cost per sq ft in bangalore
-turnkey home construction bangalore
-villa elevation design ideas
-modern duplex house elevation
-technical seo audit checklist
-how to fix crawl errors in search console"""
+c1, c2, c3 = st.columns(3)
+c1.metric("Pages Audited", len(df))
+c2.metric("Decaying Pages Flagged", len(decay_only))
+c3.metric("Total Lost Clicks", int(decay_only["Click Change"].sum()))
 
-keywords_input = st.text_area("Paste Keywords (One per line — minimum 2)", value=default_keywords, height=200)
+st.dataframe(df.sort_values("Decay %"), use_container_width=True, hide_index=True)
 
-if st.button("Cluster Keywords & Classify Intent", type="primary"):
-    keywords = list(dict.fromkeys([k.strip() for k in keywords_input.split("\n") if k.strip()]))
-    if len(keywords) < 2:
-        st.warning("Please enter at least 2 unique keywords.")
-        st.stop()
-    if provider != "Free Local Engine (No API Key Needed)" and not api_key:
-        st.warning(f"Please paste your {provider} API key in the sidebar, or choose 'Free Local Engine'.")
-        st.stop()
+if not decay_only.empty:
+    st.subheader("🛠️ Generate Content Refresh Action Plan")
+    target_page = st.selectbox("Pick a Decaying URL to Diagnose", decay_only["Page"].tolist())
+    row = decay_only[decay_only["Page"] == target_page].iloc[0]
 
-    try:
-        with st.spinner("Clustering keywords..."):
-            if "Gemini Neural" in embedding_mode:
-                embed_res = litellm.embedding(model="gemini/gemini-embedding-2", input=keywords, api_key=api_key)
-                vectors = [item["embedding"] for item in embed_res.data]
-            elif "OpenAI Neural" in embedding_mode:
-                embed_res = litellm.embedding(model="openai/text-embedding-3-small", input=keywords, api_key=api_key)
-                vectors = [item["embedding"] for item in embed_res.data]
-            else:
-                vectors = TfidfVectorizer(ngram_range=(1, 2), analyzer="char_wb", min_df=1).fit_transform(keywords).toarray()
+    if st.button("Generate Refresh Brief", type="primary"):
+        if provider == "Free Local Diagnosis Only":
+            st.success(f"**Local SEO Playbook for `{row['Page']}`** (Lost {abs(int(row['Click Change']))} clicks / {row['Decay %']}%)")
+            st.markdown(f"""
+            1. **Title & Freshness Overhaul:** Update the H1, Meta Title, and opening summary with current 2026 benchmarks for *"{row['Top Query']}"*.
+            2. **AI Overview Direct-Answer Block:** Add a 45-word bold summary table right below the introduction answering *"{row['Top Query']}"* directly so LLMs cite your page.
+            3. **Internal Link Injection:** Add 3–5 contextual internal links from your highest-traffic pages pointing to `{row['Page']}` using partial-match anchor text.
+            4. **Schema Refresh:** Update `dateModified` in your `Article` / `FAQPage` JSON-LD schema and request re-indexing in Google Search Console.
+            """)
+        elif not api_key:
+            st.warning(f"Please paste your {provider} API key in the sidebar, or select 'Free Local Diagnosis Only'.")
+        else:
+            with st.spinner(f"Building custom refresh brief with {selected_model}..."):
+                prompt = f"""
+                You are a Senior Technical SEO Strategist. This URL is experiencing severe organic traffic decay:
+                - URL: {row['Page']}
+                - Primary Keyword: {row['Top Query']}
+                - Traffic Drop: From {row['Previous Clicks']} to {row['Current Clicks']} clicks ({row['Decay %']}%)
 
-            labels = AgglomerativeClustering(n_clusters=None, distance_threshold=distance_threshold, metric="cosine", linkage="average").fit_predict(vectors)
-            df = pd.DataFrame({"Keyword": keywords, "Cluster_ID": labels})
-
-            if provider == "Free Local Engine (No API Key Needed)":
-                df["Cluster Topic"] = df["Cluster_ID"].map(df.groupby("Cluster_ID")["Keyword"].apply(list).apply(name_cluster_local).to_dict())
-                df["Search Intent"] = df["Keyword"].apply(classify_intent_local)
-                active_label = "Local Engine (0 API Calls)"
-            else:
-                grouped = df.groupby("Cluster_ID")["Keyword"].apply(list).to_dict()
-                prompt = f"Analyze these SEO keyword clusters. For each Cluster_ID, return a JSON object mapping the ID (as string) to {{'topic': 'Pillar Page Title', 'intent': 'Informational|Commercial|Transactional'}}. Clusters: {json.dumps(grouped)}. Return ONLY raw JSON."
+                Provide a concise, high-impact Content Refresh Brief containing:
+                1. New click-worthy Title Tag & H1 (2026 updated).
+                2. A 50-word 'AI Overview Citation Block' to win featured snippets and LLM citations.
+                3. 3 missing semantic subtopics (H2s) competitors are likely covering.
+                4. Internal linking anchor text suggestions.
+                """
                 resp = litellm.completion(model=selected_model, messages=[{"role": "user", "content": prompt}], api_key=api_key)
-                clean_json = resp.choices[0].message.content.replace("```json", "").replace("```", "").strip()
-                meta = json.loads(clean_json)
-                df["Cluster Topic"] = df["Cluster_ID"].astype(str).map(lambda x: meta.get(x, {}).get("topic", "General Hub"))
-                df["Search Intent"] = df["Cluster_ID"].astype(str).map(lambda x: meta.get(x, {}).get("intent", "Informational"))
-                active_label = selected_model
-
-            final_df = df[["Keyword", "Cluster Topic", "Search Intent"]].sort_values(["Cluster Topic", "Search Intent"])
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Keywords Clustered", len(final_df))
-            c2.metric("Pillar Clusters", final_df["Cluster Topic"].nunique())
-            c3.metric("Model Used", active_label)
-            st.dataframe(final_df, use_container_width=True, hide_index=True)
-            st.download_button("Download Clustered CSV", data=final_df.to_csv(index=False).encode("utf-8"), file_name="seo_clusters.csv", mime="text/csv")
-    except Exception as e:
-        st.error(f"Error: {e}")
+                st.markdown(resp.choices[0].message.content)
