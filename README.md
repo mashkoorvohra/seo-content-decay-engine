@@ -1,6 +1,7 @@
 # 📉 Universal SEO Content Decay Detector & Refresh Planner
 
 **Live App:** [https://seo-content-decay-engine.streamlit.app/](https://seo-content-decay-engine.streamlit.app/)
+> **Install as an AI Agent Skill (Claude Code / Cursor / MCP):** Get the packaged agent skill for automated GSC click-drop triage and refresh briefs on [Agensi](https://agensi.io/skills/seo-content-decay-engine).
 
 An interactive technical SEO tool that identifies high-value pages losing organic search clicks and generates prioritized content refresh playbooks. Built to run **100% free locally with zero API keys** or connect dynamically to **Google Gemini, Anthropic Claude, or OpenAI** using live-fetched model lists.
 
